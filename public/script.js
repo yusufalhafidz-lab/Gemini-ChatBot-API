@@ -80,53 +80,104 @@ function renderBotReply(messageElement, text) {
 }
 
 function formatReplyText(text) {
-  const normalized = text.replace(/\r/g, '').trim();
-  const blocks = normalized.split(/\n\s*\n/);
+  const normalized = normalizeText(text);
+  const blocks = normalized
+    .split(/\n\s*\n+/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  if (blocks.length === 0) {
+    return '<p>Sorry, no response received.</p>';
+  }
 
   return blocks
     .map((block) => {
       const lines = block
         .split('\n')
         .map((line) => line.trim())
-        .filter((line) => line.length > 0);
+        .filter(Boolean);
 
       if (lines.length === 0) return '';
 
-      if (lines.every((line) => /^\d+\.\s+/.test(line))) {
+      if (lines.every((line) => /^\d+[.)]\s+/.test(line))) {
         const items = lines.map((line) => {
-          const content = line.replace(/^\d+\.\s+/, '');
+          const content = line.replace(/^\d+[.)]\s+/, '');
           return `<li>${formatInline(content)}</li>`;
         });
         return `<ol>${items.join('')}</ol>`;
       }
 
-      if (lines.every((line) => /^[-*]\s+/.test(line))) {
+      if (lines.every((line) => /^[-*•]\s+/.test(line))) {
         const items = lines.map((line) => {
-          const content = line.replace(/^[-*]\s+/, '');
+          const content = line.replace(/^[-*•]\s+/, '');
           return `<li>${formatInline(content)}</li>`;
         });
         return `<ul>${items.join('')}</ul>`;
       }
 
-      const htmlLines = lines.map((line) => {
-        if (/^#{1,6}\s+/.test(line)) {
-          const level = Math.min(line.match(/^#+/)?.[0].length || 1, 3);
-          const content = line.replace(/^#{1,6}\s+/, '');
-          return `<h${level}>${formatInline(content)}</h${level}>`;
-        }
+      if (lines.every((line) => /^#{1,6}\s+/.test(line))) {
+        return lines
+          .map((line) => {
+            const level = Math.min(line.match(/^#+/)?.[0].length || 1, 3);
+            const content = line.replace(/^#{1,6}\s+/, '');
+            return `<h${level}>${formatInline(content)}</h${level}>`;
+          })
+          .join('');
+      }
 
-        if (/^\d+\.\s+/.test(line)) {
-          const content = line.replace(/^\d+\.\s+/, '');
-          return `<p><strong>${formatInline(content)}</strong></p>`;
-        }
+      const paragraphText = lines.join(' ');
+      const paragraphs = splitReadableParagraphs(paragraphText);
 
-        return `<p>${formatInline(line)}</p>`;
-      });
-
-      return htmlLines.join('');
+      return paragraphs.map((para) => `<p>${formatInline(para)}</p>`).join('');
     })
     .filter(Boolean)
     .join('');
+}
+
+function normalizeText(text) {
+  return text
+    .replace(/\r/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .replace(/\s+([,;:])/g, '$1')
+    .replace(/([.!?])(?=[A-Za-zÀ-ÿ\d"'])/g, '$1 ')
+    .replace(/([.!?])\s{2,}/g, '$1 ')
+    .trim();
+}
+
+function splitReadableParagraphs(text) {
+  const cleaned = normalizeText(text);
+
+  const sentences = cleaned.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) || [cleaned];
+
+  if (sentences.length <= 1) {
+    return cleaned.length > 0 ? [cleaned] : [];
+  }
+
+  const paragraphs = [];
+  let current = '';
+
+  sentences.forEach((sentence) => {
+    const trimmed = sentence.trim();
+    if (!trimmed) return;
+
+    if (!current) {
+      current = trimmed;
+      return;
+    }
+
+    const next = `${current} ${trimmed}`;
+    if (next.length <= 180 || current.split(/\s+/).length < 8) {
+      current = next;
+    } else {
+      paragraphs.push(current);
+      current = trimmed;
+    }
+  });
+
+  if (current) paragraphs.push(current);
+  return paragraphs;
 }
 
 function formatInline(text) {
